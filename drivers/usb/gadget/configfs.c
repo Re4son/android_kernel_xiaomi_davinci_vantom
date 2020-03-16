@@ -8,7 +8,9 @@
 #include "configfs.h"
 #include "u_f.h"
 #include "u_os_desc.h"
+#ifdef CONFIG_MACH_XIAOMI_F10
 #include <linux/power_supply.h>
+#endif
 
 #ifdef CONFIG_USB_CONFIGFS_UEVENT
 #include <linux/platform_device.h>
@@ -1423,6 +1425,7 @@ err_comp_cleanup:
 	return ret;
 }
 
+#ifdef CONFIG_MACH_XIAOMI_F10
 static int smblib_canncel_recheck(void)
 {
 	union power_supply_propval pval = {0};
@@ -1443,6 +1446,7 @@ static int smblib_canncel_recheck(void)
 
 	return rc;
 }
+#endif
 
 #ifdef CONFIG_USB_CONFIGFS_UEVENT
 static void android_work(struct work_struct *data)
@@ -1481,7 +1485,9 @@ static void android_work(struct work_struct *data)
 		kobject_uevent_env(&gi->dev->kobj,
 					KOBJ_CHANGE, configured);
 		pr_info("%s: sent uevent %s\n", __func__, configured[0]);
+#ifdef CONFIG_MACH_XIAOMI_F10
 		smblib_canncel_recheck();
+#endif
 		uevent_sent = true;
 	}
 

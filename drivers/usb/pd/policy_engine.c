@@ -346,10 +346,12 @@ static void *usbpd_ipc_log;
 #define ID_HDR_PRODUCT_AMA	5
 #define ID_HDR_PRODUCT_VPD	6
 
+#ifdef CONFIG_MACH_XIAOMI_F10
 #define PD_VBUS_MAX_VOLTAGE_LIMIT	9000000
 #define PD_MAX_CURRENT_LIMIT		4000000
-#define MAX_FIXED_PDO_MA		2000
-#define MAX_NON_COMPLIANT_PPS_UA		2000000
+#define MAX_FIXED_PDO_MA			2000
+#define MAX_NON_COMPLIANT_PPS_UA	2000000
+#endif
 
 static bool check_vsafe0v = true;
 module_param(check_vsafe0v, bool, 0600);
@@ -448,9 +450,13 @@ struct usbpd {
 	struct regulator	*vconn;
 	bool			vbus_enabled;
 	bool			vconn_enabled;
-	bool			vconn_is_external;
+#ifdef CONFIG_MACH_XIAOMI_F10
+	u32			limit_pd_vbus;
+	u32			pd_vbus_max_limit;
+	bool		vconn_is_external;
 	u32			limit_curr;
 	u32			pd_max_curr_limit;
+#endif
 
 	u8			tx_msgid[SOPII_MSG + 1];
 	u8			rx_msgid[SOPII_MSG + 1];
@@ -825,7 +831,7 @@ static int pd_select_pdo(struct usbpd *pd, int pdo_pos, int uv, int ua)
 
 		pd->requested_voltage =
 			PD_SRC_PDO_FIXED_VOLTAGE(pdo) * 50 * 1000;
-
+#ifdef CONFIG_MACH_XIAOMI_F10
 		/* pd request uv will less than pd vbus max 9V for fixed pdos */
 		if (pd->requested_voltage > PD_VBUS_MAX_VOLTAGE_LIMIT)
 			return -ENOTSUPP;
@@ -838,6 +844,7 @@ static int pd_select_pdo(struct usbpd *pd, int pdo_pos, int uv, int ua)
 		if (pd->requested_voltage == PD_VBUS_MAX_VOLTAGE_LIMIT
 				&& curr >= MAX_FIXED_PDO_MA)
 			curr = MAX_FIXED_PDO_MA;
+#endif
 
 		pd->rdo = PD_RDO_FIXED(pdo_pos, 0, mismatch, 1, 1, curr / 10,
 				max_current / 10);
@@ -867,6 +874,10 @@ static int pd_select_pdo(struct usbpd *pd, int pdo_pos, int uv, int ua)
 		}
 
 		curr = ua / 1000;
+#ifdef CONFIG_MACH_XIAOMI_F10
+		/* if limit_pd_vbus is enabled, pd request uv will less than pd vbus max */
+		if (pd->limit_pd_vbus && uv > pd->pd_vbus_max_limit)
+			uv = pd->pd_vbus_max_limit;
 		/*
 		 * workaround for Zimi and similar non-compliant QC4+/PPS chargers:
 		 * if PPS power limit bit is set and QC4+ not compliant PPS chargers,
@@ -964,6 +975,7 @@ static int pd_select_pdo_for_bq(struct usbpd *pd, int pdo_pos, int uv, int ua)
 			ua = MAX_NON_COMPLIANT_PPS_UA;
 			curr = ua / 1000;
 		}
+#endif
 
 		pd->requested_voltage = uv;
 		pd->rdo = PD_RDO_AUGMENTED(pdo_pos, mismatch, 1, 1,
@@ -5238,6 +5250,23 @@ struct usbpd *usbpd_create(struct device *parent)
 	extcon_set_property_capability(pd->extcon, EXTCON_USB_HOST,
 			EXTCON_PROP_USB_SS);
 
+#ifdef CONFIG_MACH_XIAOMI_F10
+	ret = of_property_read_u32(parent->of_node, "mi,limit_pd_vbus",
+			&pd->limit_pd_vbus);
+	if (ret) {
+		usbpd_err(&pd->dev, "failed to read pd vbus limit\n");
+		pd->limit_pd_vbus = false;
+	}
+
+	if (pd->limit_pd_vbus) {
+		ret = of_property_read_u32(parent->of_node, "mi,pd_vbus_max_limit",
+				&pd->pd_vbus_max_limit);
+		if (ret) {
+			usbpd_err(&pd->dev, "failed to read pd vbus max limit\n");
+			pd->pd_vbus_max_limit = PD_VBUS_MAX_VOLTAGE_LIMIT;
+		}
+	}
+
 	pd->vbus = devm_regulator_get(parent, "vbus");
 	if (IS_ERR(pd->vbus)) {
 		ret = PTR_ERR(pd->vbus);
@@ -5270,8 +5299,9 @@ struct usbpd *usbpd_create(struct device *parent)
 				"mi,non-qcom-pps-ctrl");
 
 	pd->vconn_is_external = device_property_present(parent,
-					"qcom,vconn-uses-external-source");
+				"qcom,vconn-uses-external-source");
 
+#endif
 	pd->num_sink_caps = device_property_read_u32_array(parent,
 			"qcom,default-sink-caps", NULL, 0);
 	if (pd->num_sink_caps > 0) {
